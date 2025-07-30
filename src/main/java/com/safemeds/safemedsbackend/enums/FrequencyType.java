@@ -8,5 +8,4 @@ public enum FrequencyType {
     EVERY_X_WEEKS,
     EVERY_X_MONTHS,
     CYCLE_BASED,
-    AS_NEEDED
 }

@@ -10,31 +10,19 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
-@Getter
-@Setter
-@NoArgsConstructor
-@AllArgsConstructor
+@Data
 @Builder
 public class UserProfileResponseDTO {
 
     private UUID id;
-
     private String firstName;
-
     private String lastName;
-
     private Gender gender;
-
     private LocalDate birthDate;
-
     private LanguagePreference languagePreference;
-
     private ThemePreference themePreference;
-
-    private List<AllergyDTO> allergies;
-
+    private List<AllergyResponseDTO> allergies;
     private LocalDateTime createdAt;
-
     private LocalDateTime updatedAt;
 
 }

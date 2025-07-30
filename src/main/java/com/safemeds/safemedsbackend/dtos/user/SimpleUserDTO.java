@@ -4,13 +4,11 @@ import lombok.*;
 
 import java.util.UUID;
 
-@Getter
-@Setter
-@NoArgsConstructor
-@AllArgsConstructor
+@Data
 @Builder
 public class SimpleUserDTO {
     private UUID id;
     private String firstName;
     private String lastName;
+
 }

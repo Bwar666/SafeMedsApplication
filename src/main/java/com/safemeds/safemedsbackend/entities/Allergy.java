@@ -1,10 +1,7 @@
 package com.safemeds.safemedsbackend.entities;
 
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
-import lombok.ToString;
+import lombok.*;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -14,19 +11,23 @@ import java.util.UUID;
 @Getter
 @Setter
 @NoArgsConstructor
-@ToString
+@AllArgsConstructor
+@Builder
 public class Allergy {
+
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    // Name of the allergy, e.g., "Penicillin", "Peanuts"
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false)
     private String name;
 
-    // Optional description for more details about the allergy
     @Column(length = 500)
     private String description;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_profile_id", nullable = false)
+    private UserProfile userProfile;
 
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;

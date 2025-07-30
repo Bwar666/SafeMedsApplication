@@ -15,5 +15,5 @@ public class MedicineSummaryDTO {
     private String name;
     private String icon;
     private String color;
-    private String nextIntakeTime; // e.g., "08:00"
+    private String nextIntakeTime;
 }

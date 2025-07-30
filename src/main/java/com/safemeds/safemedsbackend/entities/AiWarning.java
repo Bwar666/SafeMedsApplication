@@ -1,21 +1,16 @@
 package com.safemeds.safemedsbackend.entities;
 
-import com.safemeds.safemedsbackend.enums.AiWarningType;
-import com.safemeds.safemedsbackend.enums.WarningSeverity;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 
 import java.time.LocalDateTime;
-import java.util.HashSet;
-import java.util.Set;
 import java.util.UUID;
 
 @Entity
 @Table(name = "ai_warnings")
-@Getter
-@Setter
+@Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
@@ -25,49 +20,35 @@ public class AiWarning {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    // Type of the warning (e.g., allergy, overdose, interaction)
-    @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private AiWarningType type;
-
-    // Severity level of the warning
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private WarningSeverity severity = WarningSeverity.MEDIUM;
-
-    // Full message shown to the user
-    @Column(nullable = false, columnDefinition = "TEXT")
-    private String message;
-
-    // Optional technical or structured info (could be JSON or plain text)
-    @Column(columnDefinition = "TEXT")
-    private String details;
-
-    // Whether the user has seen the warning
-    @Column(nullable = false)
+    @Builder.Default
     private boolean seen = false;
 
-    // Related user profile
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean resolved = false;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_profile_id", nullable = false)
     @OnDelete(action = OnDeleteAction.CASCADE)
     private UserProfile userProfile;
 
-    // Related medicines (supports multi-drug interactions)
-    @ManyToMany(fetch = FetchType.LAZY)
-    @JoinTable(
-            name = "ai_warning_medicines",
-            joinColumns = @JoinColumn(name = "warning_id"),
-            inverseJoinColumns = @JoinColumn(name = "medicine_id")
-    )
-    @Builder.Default
-    private Set<Medicine> relatedMedicines = new HashSet<>();
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "medicine_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
+    private Medicine medicine;
 
-    // Timestamp when user resolved the warning
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "allergy_id")
+    private Allergy allergy;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "evaluation_result_id", nullable = false)
+    private AiEvaluationResult evaluationResult;
+
     @Column(name = "resolved_at")
     private LocalDateTime resolvedAt;
 
-    // Timestamp tracking
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
@@ -85,18 +66,8 @@ public class AiWarning {
         this.updatedAt = LocalDateTime.now();
     }
 
-    // Helper method to add related medicines
-    public void addRelatedMedicine(Medicine medicine) {
-        if (medicine == null) return;
-        this.relatedMedicines.add(medicine);
-    }
-
     public void markAsResolved() {
-        if (this.resolvedAt == null) {
-            this.resolvedAt = LocalDateTime.now();
-        }
-    }
-    public boolean isResolved() {
-        return this.resolvedAt != null;
+        this.resolved = true;
+        this.resolvedAt = LocalDateTime.now();
     }
 }
