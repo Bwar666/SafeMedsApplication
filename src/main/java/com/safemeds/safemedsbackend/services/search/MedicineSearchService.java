@@ -1,6 +1,6 @@
 package com.safemeds.safemedsbackend.services.search;
 
-import com.safemeds.safemedsbackend.config.MedicalApiConfig;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.safemeds.safemedsbackend.dtos.search.SearchSuggestionDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,141 +17,139 @@ import java.util.stream.Collectors;
 @Slf4j
 public class MedicineSearchService {
 
-    private final MedicalApiConfig config;
     private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
     private String lastSearchSource = "";
 
     public List<SearchSuggestionDTO> search(String query, int limit) {
         List<SearchSuggestionDTO> results = new ArrayList<>();
-        List<String> sources = new ArrayList<>();
 
         try {
-            List<SearchSuggestionDTO> rxNormResults = searchRxNorm(query, limit);
-            results.addAll(rxNormResults);
-            if (!rxNormResults.isEmpty()) {
-                sources.add("RxNorm");
+            log.info("Searching RxTerms for medicines: {}", query);
+            List<SearchSuggestionDTO> rxTermsResults = searchRxTerms(query, limit);
+            results.addAll(rxTermsResults);
+
+            if (!rxTermsResults.isEmpty()) {
+                lastSearchSource = "RxTerms-API";
+                log.info("RxTerms returned {} results", rxTermsResults.size());
+            } else {
+                lastSearchSource = "No results found";
+                log.info("RxTerms returned no results for: {}", query);
             }
         } catch (Exception e) {
-            log.warn("RxNorm failed: {}", e.getMessage());
+            log.error("RxTerms API failed: {}", e.getMessage(), e);
+            lastSearchSource = "API Error: " + e.getMessage();
         }
 
-        if (results.size() < limit) {
-            try {
-                List<SearchSuggestionDTO> fdaResults = searchOpenFDA(query, limit - results.size());
-                results.addAll(fdaResults);
-                if (!fdaResults.isEmpty()) {
-                    sources.add("OpenFDA");
-                }
-            } catch (Exception e) {
-                log.warn("OpenFDA failed: {}", e.getMessage());
-            }
-        }
-
-        lastSearchSource = sources.isEmpty() ? "No APIs available" : String.join(" + ", sources);
         return removeDuplicates(results).stream().limit(limit).collect(Collectors.toList());
     }
 
-    private List<SearchSuggestionDTO> searchRxNorm(String query, int limit) {
+    private List<SearchSuggestionDTO> searchRxTerms(String query, int limit) {
         String url = UriComponentsBuilder
-                .fromUriString(config.getRxNorm().getBaseUrl())
-                .path("/drugs.json")
-                .queryParam("name", query)
+                .fromUriString("https://clinicaltables.nlm.nih.gov/api/rxterms/v3/search")
+                .queryParam("terms", query)
+                .queryParam("maxList", Math.min(limit, 10))
+                .queryParam("df", "DISPLAY_NAME") // Display field - user-friendly names
                 .toUriString();
 
-        ResponseEntity<Map> response = restTemplate.getForEntity(url, Map.class);
+        log.info("RxTerms URL: {}", url);
 
-        if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
-            return parseRxNormResponse(response.getBody(), query, limit);
-        }
-        return Collections.emptyList();
-    }
+        HttpHeaders headers = new HttpHeaders();
+        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+        headers.add("User-Agent", "SafeMeds-Backend/1.0");
 
-    private List<SearchSuggestionDTO> searchOpenFDA(String query, int limit) {
-        String url = UriComponentsBuilder
-                .fromUriString(config.getOpenFda().getBaseUrl())
-                .path("/drug/label.json")
-                .queryParam("api_key", config.getOpenFda().getApiKey())
-                .queryParam("search", "openfda.brand_name:" + query + "*")
-                .queryParam("limit", Math.min(limit, 10))
-                .toUriString();
-
-        ResponseEntity<Map> response = restTemplate.getForEntity(url, Map.class);
-
-        if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
-            return parseOpenFDAResponse(response.getBody(), limit);
-        }
-        return Collections.emptyList();
-    }
-
-    private List<SearchSuggestionDTO> parseRxNormResponse(Map<String, Object> body, String query, int limit) {
-        List<SearchSuggestionDTO> results = new ArrayList<>();
+        HttpEntity<String> entity = new HttpEntity<>(headers);
 
         try {
-            Map<String, Object> drugGroup = (Map<String, Object>) body.get("drugGroup");
-            if (drugGroup == null) return results;
+            // Get response as String first to log it
+            ResponseEntity<String> stringResponse = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
 
-            List<Map<String, Object>> conceptGroups = (List<Map<String, Object>>) drugGroup.get("conceptGroup");
-            if (conceptGroups == null) return results;
+            log.info("API Response Status: {}", stringResponse.getStatusCode());
+            log.info("Raw API Response: {}", stringResponse.getBody());
 
-            for (Map<String, Object> group : conceptGroups) {
-                List<Map<String, Object>> concepts = (List<Map<String, Object>>) group.get("conceptProperties");
-                if (concepts != null) {
-                    for (Map<String, Object> concept : concepts) {
-                        String name = (String) concept.get("name");
-                        String rxcui = (String) concept.get("rxcui");
+            if (stringResponse.getStatusCode() == HttpStatus.OK && stringResponse.getBody() != null) {
+                return parseRxTermsResponse(stringResponse.getBody(), query, limit);
+            }
 
-                        if (name != null && name.toLowerCase().contains(query.toLowerCase())) {
+        } catch (Exception e) {
+            log.error("Error calling RxTerms API: {}", e.getMessage(), e);
+        }
+
+        log.warn("RxTerms API returned empty or invalid response");
+        return Collections.emptyList();
+    }
+
+    private List<SearchSuggestionDTO> parseRxTermsResponse(String responseBody, String query, int limit) {
+        List<SearchSuggestionDTO> results = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+
+        try {
+            // Parse the JSON response into an array
+            Object[] responseArray = objectMapper.readValue(responseBody, Object[].class);
+
+            log.info("Response array length: {}", responseArray.length);
+
+            if (responseArray.length < 2) {
+                log.warn("Response array too short, expected at least 2 elements, got: {}", responseArray.length);
+                return results;
+            }
+
+            // Element 0: Total count
+            Integer totalCount = (Integer) responseArray[0];
+            log.info("Total results available: {}", totalCount);
+
+            // Element 1: Array of medicine names
+            @SuppressWarnings("unchecked")
+            List<String> medicineNames = (List<String>) responseArray[1];
+            log.info("Number of medicine names returned: {}", medicineNames != null ? medicineNames.size() : 0);
+
+            if (medicineNames != null && !medicineNames.isEmpty()) {
+                for (String medicineName : medicineNames) {
+                    if (results.size() >= limit) break;
+
+                    if (medicineName != null && !medicineName.trim().isEmpty()) {
+                        String cleanName = cleanMedicineName(medicineName);
+
+                        if (cleanName.length() >= 2 && !seen.contains(cleanName.toLowerCase())) {
                             results.add(SearchSuggestionDTO.builder()
-                                    .value(name)
-                                    .displayName(name)
-                                    .description("Medication from RxNorm")
-                                    .source("API")
+                                    .value(cleanName)
+                                    .displayName(cleanName)
+                                    .description("Medication")
+                                    .source("RxTerms")
                                     .category("MEDICINE")
-                                    .code(rxcui)
                                     .build());
 
-                            if (results.size() >= limit) return results;
+                            seen.add(cleanName.toLowerCase());
+                            log.debug("Added medicine: {}", cleanName);
                         }
                     }
                 }
             }
+
         } catch (Exception e) {
-            log.warn("Error parsing RxNorm response: {}", e.getMessage());
+            log.error("Error parsing RxTerms response: {}", e.getMessage(), e);
+            log.error("Response body was: {}", responseBody);
+
+            // If parsing fails, return empty list instead of crashing
+            return Collections.emptyList();
         }
 
+        log.info("Parsed {} medicine results from RxTerms", results.size());
         return results;
     }
 
-    private List<SearchSuggestionDTO> parseOpenFDAResponse(Map<String, Object> body, int limit) {
-        List<SearchSuggestionDTO> results = new ArrayList<>();
+    private String cleanMedicineName(String rawName) {
+        if (rawName == null) return "";
 
-        try {
-            List<Map<String, Object>> fdaResults = (List<Map<String, Object>>) body.get("results");
-            if (fdaResults == null) return results;
+        String cleaned = rawName.trim();
 
-            for (Map<String, Object> result : fdaResults) {
-                Map<String, Object> openfda = (Map<String, Object>) result.get("openfda");
-                if (openfda != null) {
-                    List<String> brandNames = (List<String>) openfda.get("brand_name");
-                    if (brandNames != null && !brandNames.isEmpty()) {
-                        String brandName = brandNames.get(0);
-                        results.add(SearchSuggestionDTO.builder()
-                                .value(brandName)
-                                .displayName(brandName)
-                                .description("Brand medication from FDA")
-                                .source("API")
-                                .category("MEDICINE")
-                                .build());
+        // Remove everything in parentheses (Oral Pill), (Chewable), etc.
+        cleaned = cleaned.replaceAll("\\s*\\([^)]*\\)\\s*", "");
 
-                        if (results.size() >= limit) return results;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("Error parsing OpenFDA response: {}", e.getMessage());
-        }
+        // Remove extra spaces and trim
+        cleaned = cleaned.replaceAll("\\s+", " ").trim();
 
-        return results;
+        return cleaned;
     }
 
     private List<SearchSuggestionDTO> removeDuplicates(List<SearchSuggestionDTO> suggestions) {

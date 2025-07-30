@@ -1,5 +1,7 @@
+// ConditionSearchService.java - Fixed with proper Clinical Tables API parsing
 package com.safemeds.safemedsbackend.services.search;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.safemeds.safemedsbackend.dtos.search.SearchSuggestionDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,165 +19,153 @@ import java.util.stream.Collectors;
 public class ConditionSearchService {
 
     private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
     private String lastSearchSource = "";
 
     public List<SearchSuggestionDTO> search(String query, int limit) {
         List<SearchSuggestionDTO> results = new ArrayList<>();
-        List<String> sources = new ArrayList<>();
 
         try {
+            log.info("Searching Clinical Tables for conditions: {}", query);
             List<SearchSuggestionDTO> clinicalTablesResults = searchClinicalTables(query, limit);
             results.addAll(clinicalTablesResults);
+
             if (!clinicalTablesResults.isEmpty()) {
-                sources.add("Clinical-Tables");
+                lastSearchSource = "Clinical-Tables";
                 log.info("Clinical Tables returned {} results", clinicalTablesResults.size());
+            } else {
+                lastSearchSource = "No results found";
+                log.info("Clinical Tables returned no results for: {}", query);
             }
         } catch (Exception e) {
-            log.warn("Clinical Tables failed: {}", e.getMessage());
+            log.error("Clinical Tables API failed: {}", e.getMessage(), e);
+            lastSearchSource = "API Error: " + e.getMessage();
         }
 
-        if (results.size() < limit) {
-            try {
-                List<SearchSuggestionDTO> medlineResults = searchMedlinePlus(query, limit - results.size());
-                results.addAll(medlineResults);
-                if (!medlineResults.isEmpty()) {
-                    sources.add("MedlinePlus");
-                    log.info("MedlinePlus returned {} results", medlineResults.size());
-                }
-            } catch (Exception e) {
-                log.warn("MedlinePlus failed: {}", e.getMessage());
-            }
-        }
-
-        lastSearchSource = sources.isEmpty() ? "No APIs available" : String.join(" + ", sources);
         return removeDuplicates(results).stream().limit(limit).collect(Collectors.toList());
     }
 
     private List<SearchSuggestionDTO> searchClinicalTables(String query, int limit) {
+        // Use consumer_name for display as it's more user-friendly
         String url = UriComponentsBuilder
                 .fromUriString("https://clinicaltables.nlm.nih.gov/api/conditions/v3/search")
                 .queryParam("terms", query)
-                .queryParam("maxList", Math.min(limit, 20))
-                .queryParam("df", "primary_name,consumer_name,info_link_data")
+                .queryParam("count", Math.min(limit, 10))
+                .queryParam("df", "consumer_name") // Display field - what we show to user
+                .queryParam("ef", "primary_name,icd10cm_codes") // Extra fields for additional data
                 .toUriString();
+
+        log.info("Clinical Tables URL: {}", url);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
         headers.add("User-Agent", "SafeMeds-Backend/1.0");
 
         HttpEntity<String> entity = new HttpEntity<>(headers);
-        ResponseEntity<List> response = restTemplate.exchange(url, HttpMethod.GET, entity, List.class);
-
-        if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
-            return parseClinicalTablesResponse(response.getBody(), query, limit);
-        }
-        return Collections.emptyList();
-    }
-
-    private List<SearchSuggestionDTO> searchMedlinePlus(String query, int limit) {
-        String url = UriComponentsBuilder
-                .fromUriString("https://wsearch.nlm.nih.gov/ws/query")
-                .queryParam("db", "healthTopics")
-                .queryParam("term", query)
-                .queryParam("retmax", Math.min(limit, 10))
-                .queryParam("rettype", "brief")
-                .toUriString();
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_XML));
-        headers.add("User-Agent", "SafeMeds-Backend/1.0");
-
-        HttpEntity<String> entity = new HttpEntity<>(headers);
-        ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
-
-        if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
-            return parseMedlinePlusResponse(response.getBody(), query, limit);
-        }
-        return Collections.emptyList();
-    }
-
-    private List<SearchSuggestionDTO> parseClinicalTablesResponse(List responseBody, String query, int limit) {
-        List<SearchSuggestionDTO> results = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
 
         try {
+            // Get response as String first to log it
+            ResponseEntity<String> stringResponse = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
 
-            if (responseBody.size() >= 2) {
-                List<String> terms = (List<String>) responseBody.get(1);
-                for (int i = 0; i < terms.size() && results.size() < limit; i++) {
-                    String term = terms.get(i);
-                    if (term != null && !seen.contains(term.toLowerCase()) && term.length() > 1) {
-                        String cleanName = cleanConditionName(term);
+            log.info("API Response Status: {}", stringResponse.getStatusCode());
+            log.info("Raw API Response: {}", stringResponse.getBody());
 
-                        if (cleanName.length() < 2 || cleanName.matches("^\\d+$")) {
-                            continue;
-                        }
-
-                        results.add(SearchSuggestionDTO.builder()
-                                .value(cleanName)
-                                .displayName(cleanName)
-                                .description("Medical condition")
-                                .source("API")
-                                .category("CONDITION")
-                                .build());
-
-                        seen.add(cleanName.toLowerCase());
-                    }
-                }
+            if (stringResponse.getStatusCode() == HttpStatus.OK && stringResponse.getBody() != null) {
+                return parseClinicalTablesResponse(stringResponse.getBody(), query, limit);
             }
+
         } catch (Exception e) {
-            log.warn("Error parsing Clinical Tables response: {}", e.getMessage());
+            log.error("Error calling Clinical Tables API: {}", e.getMessage(), e);
         }
 
-        return results;
+        log.warn("Clinical Tables API returned empty or invalid response");
+        return Collections.emptyList();
     }
 
-    private List<SearchSuggestionDTO> parseMedlinePlusResponse(String xmlResponse, String query, int limit) {
+    private List<SearchSuggestionDTO> parseClinicalTablesResponse(String responseBody, String query, int limit) {
         List<SearchSuggestionDTO> results = new ArrayList<>();
         Set<String> seen = new HashSet<>();
 
         try {
-            String[] lines = xmlResponse.split("\n");
+            // Parse the JSON response into an array
+            Object[] responseArray = objectMapper.readValue(responseBody, Object[].class);
 
-            for (String line : lines) {
-                if (line.contains("<content") && line.contains("title=")) {
-                    int start = line.indexOf("title=\"") + 7;
-                    int end = line.indexOf("\"", start);
+            log.info("Response array length: {}", responseArray.length);
 
-                    if (start > 6 && end > start) {
-                        String title = line.substring(start, end)
-                                .replaceAll("<[^>]*>", "")
-                                .trim();
+            if (responseArray.length < 4) {
+                log.warn("Response array too short, expected at least 4 elements, got: {}", responseArray.length);
+                return results;
+            }
 
-                        if (title.toLowerCase().contains(query.toLowerCase()) &&
-                                !seen.contains(title.toLowerCase()) &&
-                                title.length() > 2) {
+            // Element 0: Total count
+            Integer totalCount = (Integer) responseArray[0];
+            log.info("Total results available: {}", totalCount);
 
+            // Element 1: Array of codes/IDs
+            @SuppressWarnings("unchecked")
+            List<String> codes = (List<String>) responseArray[1];
+            log.info("Number of codes returned: {}", codes != null ? codes.size() : 0);
 
-                            String cleanName = cleanConditionName(title);
+            // Element 2: Extra fields data (map)
+            @SuppressWarnings("unchecked")
+            Map<String, List<String>> extraData = (Map<String, List<String>>) responseArray[2];
 
-                            if (cleanName.length() < 2 || cleanName.matches("^\\d+$")) {
-                                continue;
+            // Element 3: Display fields data (array of arrays)
+            @SuppressWarnings("unchecked")
+            List<List<String>> displayData = (List<List<String>>) responseArray[3];
+            log.info("Number of display items: {}", displayData != null ? displayData.size() : 0);
+
+            if (displayData != null && !displayData.isEmpty()) {
+                for (int i = 0; i < displayData.size() && results.size() < limit; i++) {
+                    List<String> displayItem = displayData.get(i);
+
+                    if (displayItem != null && !displayItem.isEmpty()) {
+                        String consumerName = displayItem.get(0); // consumer_name from df parameter
+
+                        if (consumerName != null && !consumerName.trim().isEmpty()) {
+                            String cleanName = cleanConditionName(consumerName);
+
+                            if (cleanName.length() >= 2 && !seen.contains(cleanName.toLowerCase())) {
+                                // Get additional data if available
+                                String primaryName = null;
+                                String icdCodes = null;
+
+                                if (extraData != null) {
+                                    if (extraData.containsKey("primary_name") && extraData.get("primary_name").size() > i) {
+                                        primaryName = extraData.get("primary_name").get(i);
+                                    }
+                                    if (extraData.containsKey("icd10cm_codes") && extraData.get("icd10cm_codes").size() > i) {
+                                        icdCodes = extraData.get("icd10cm_codes").get(i);
+                                    }
+                                }
+
+                                String description = "Medical condition";
+                                if (primaryName != null && !primaryName.equals(cleanName)) {
+                                    description = "Medical condition (" + primaryName + ")";
+                                }
+
+                                results.add(SearchSuggestionDTO.builder()
+                                        .value(cleanName)
+                                        .displayName(cleanName)
+                                        .description(description)
+                                        .source("Clinical-Tables")
+                                        .category("CONDITION")
+                                        .build());
+
+                                seen.add(cleanName.toLowerCase());
+                                log.debug("Added condition: {}", cleanName);
                             }
-
-                            results.add(SearchSuggestionDTO.builder()
-                                    .value(cleanName)
-                                    .displayName(cleanName)
-                                    .description("Health condition")
-                                    .source("API")
-                                    .category("CONDITION")
-                                    .build());
-
-                            seen.add(cleanName.toLowerCase());
-                            if (results.size() >= limit) break;
                         }
                     }
                 }
             }
+
         } catch (Exception e) {
-            log.warn("Error parsing MedlinePlus response: {}", e.getMessage());
+            log.error("Error parsing Clinical Tables response: {}", e.getMessage(), e);
+            log.error("Response body was: {}", responseBody);
         }
 
+        log.info("Parsed {} condition results from Clinical Tables", results.size());
         return results;
     }
 
@@ -187,7 +177,7 @@ public class ConditionSearchService {
                 .replaceAll("<[^>]*>", "")
                 .trim();
 
-        // Remove ICD codes and medical codes (like "E11.9", "250.00")
+        // Remove ICD codes and medical codes
         cleaned = cleaned.replaceAll("\\b[A-Z]\\d{1,3}(\\.\\d+)?\\b", "")
                 .replaceAll("\\b\\d{3}(\\.\\d+)?\\b", "");
 
@@ -214,9 +204,7 @@ public class ConditionSearchService {
     private String capitalizeConditionName(String text) {
         if (text == null || text.isEmpty()) return text;
 
-        // Handle special medical terms that should stay lowercase
         String[] keepLowercase = {"of", "and", "or", "in", "on", "with", "without", "the", "a", "an"};
-
         String[] words = text.toLowerCase().split("\\s+");
         StringBuilder result = new StringBuilder();
 
@@ -225,7 +213,6 @@ public class ConditionSearchService {
             if (!word.isEmpty()) {
                 if (result.length() > 0) result.append(" ");
 
-                // First word is always capitalized, others check the list
                 if (i == 0 || !Arrays.asList(keepLowercase).contains(word)) {
                     result.append(Character.toUpperCase(word.charAt(0)))
                             .append(word.substring(1));
