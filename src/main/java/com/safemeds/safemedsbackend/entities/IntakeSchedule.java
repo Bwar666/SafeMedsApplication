@@ -11,8 +11,7 @@ import java.time.LocalTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class DosageSchedule {
-
+public class IntakeSchedule {
     private LocalTime time;
-    private int amount; // e.g., 2 pills
+    private Double amount;
 }

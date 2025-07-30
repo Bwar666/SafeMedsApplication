@@ -13,8 +13,6 @@ import java.util.UUID;
 public class AllergyResponseDTO {
 
     private UUID id;
-
     private String name;
-
     private String description;
 }

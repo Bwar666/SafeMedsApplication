@@ -1,19 +1,21 @@
 package com.safemeds.safemedsbackend.dtos.medicine;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import jakarta.validation.constraints.*;
 import lombok.*;
 
-@Getter
-@Setter
+import java.time.LocalTime;
+
+@Data
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
 public class IntakeScheduleDTO {
+    @NotNull
+    @JsonFormat(pattern = "HH:mm")
+    private LocalTime time;
 
-    @NotBlank(message = "Time is required (in HH:mm format)")
-    @Pattern(regexp = "^\\d{2}:\\d{2}$", message = "Time must be in HH:mm format")
-    private String time; // e.g., "08:00"
-
-    @Min(value = 1, message = "Dosage amount must be at least 1")
-    private int dosageAmount;
+    @Positive
+    private Double amount;
 }
+

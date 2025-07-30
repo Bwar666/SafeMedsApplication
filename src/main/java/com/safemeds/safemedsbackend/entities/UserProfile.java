@@ -5,8 +5,7 @@ import lombok.*;
 import com.safemeds.safemedsbackend.enums.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 
 @Entity
 @Table(name = "user_profiles")
@@ -34,13 +33,12 @@ public class UserProfile {
     @Column(name = "birth_date", nullable = false)
     private LocalDate birthDate;
 
-    @ManyToMany
-    @JoinTable(
-            name = "user_profile_allergies",
-            joinColumns = @JoinColumn(name = "user_profile_id"),
-            inverseJoinColumns = @JoinColumn(name = "allergy_id")
+    @OneToMany(
+            mappedBy = "userProfile",
+            cascade = CascadeType.ALL,
+            orphanRemoval = true
     )
-    private Set<Allergy> allergies;
+    private List<Allergy> allergies = new ArrayList<>();
 
     @Enumerated(EnumType.STRING)
     @Column(name = "language", nullable = false)

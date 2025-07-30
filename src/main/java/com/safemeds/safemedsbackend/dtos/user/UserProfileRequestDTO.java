@@ -9,12 +9,8 @@ import lombok.*;
 
 import java.time.LocalDate;
 import java.util.List;
-import java.util.UUID;
 
-@Getter
-@Setter
-@NoArgsConstructor
-@AllArgsConstructor
+@Data
 @Builder
 public class UserProfileRequestDTO {
 
@@ -37,9 +33,5 @@ public class UserProfileRequestDTO {
     @NotNull(message = "Theme preference is required")
     private ThemePreference themePreference;
 
-    /**
-     * List of allergy IDs the user selects (from the master list).
-     * Frontend should send selected UUIDs only.
-     */
-    private List<UUID> allergyIds;
+    private List<AllergyRequestDTO> allergies;
 }

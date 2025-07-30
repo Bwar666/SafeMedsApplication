@@ -16,6 +16,6 @@ public class SafemedsBackendApplication {
 
     @GetMapping
     public String  test(){
-        return "Hello World";
+        return "Hello World Spring Boot SafemedsBackendApplication";
     }
 }
