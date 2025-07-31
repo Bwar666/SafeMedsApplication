@@ -96,4 +96,19 @@ public interface IntakeEventRepository extends JpaRepository<IntakeEvent, UUID> 
     List<IntakeEvent> findEventsToMarkAsMissed(
             @Param("status") IntakeStatus status,
             @Param("beforeDateTime") LocalDateTime beforeDateTime);
+
+    @Query("SELECT ie FROM IntakeEvent ie WHERE ie.status = :status AND ie.scheduledDateTime BETWEEN :start AND :end")
+    List<IntakeEvent> findByStatusAndScheduledDateTimeBetween(
+            @Param("status") IntakeStatus status,
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end);
+
+    @Query("SELECT ie FROM IntakeEvent ie WHERE ie.status = :status")
+    List<IntakeEvent> findByStatus(@Param("status") IntakeStatus status);
+
+    @Query("SELECT ie FROM IntakeEvent ie WHERE ie.medicine.userProfile.id = :userId AND ie.scheduledDateTime BETWEEN :start AND :end")
+    List<IntakeEvent> findByMedicineUserProfileIdAndScheduledDateTimeBetween(
+            @Param("userId") UUID userId,
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end);
 }

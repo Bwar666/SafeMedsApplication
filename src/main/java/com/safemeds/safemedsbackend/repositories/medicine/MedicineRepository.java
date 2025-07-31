@@ -1,6 +1,7 @@
 package com.safemeds.safemedsbackend.repositories.medicine;
 
 import com.safemeds.safemedsbackend.entities.Medicine;
+import com.safemeds.safemedsbackend.entities.UserProfile;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -61,4 +62,10 @@ public interface MedicineRepository extends JpaRepository<Medicine, UUID> {
             "AND m.currentInventory <= m.refillReminderThreshold) " +
             "OR (m.currentInventory IS NOT NULL AND m.currentInventory <= 0))")
     List<Medicine> findMedicinesNeedingRefill(@Param("userId") UUID userId);
+
+    @Query("SELECT m FROM Medicine m WHERE m.isActive = true AND m.notificationsEnabled = true")
+    List<Medicine> findByIsActiveTrueAndNotificationsEnabledTrue();
+
+    @Query("SELECT DISTINCT m.userProfile FROM Medicine m WHERE m.isActive = true")
+    List<UserProfile> findDistinctUsersByActiveMedicines();
 }

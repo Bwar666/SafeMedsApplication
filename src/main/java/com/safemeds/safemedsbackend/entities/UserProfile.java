@@ -3,6 +3,7 @@ package com.safemeds.safemedsbackend.entities;
 import jakarta.persistence.*;
 import lombok.*;
 import com.safemeds.safemedsbackend.enums.*;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
